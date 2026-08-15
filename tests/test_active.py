@@ -156,9 +156,21 @@ def test_deferred_sur_4xx():
     assert classify_disposition(smtp, DeliveryResult()) is Disposition.DEFERRED
 
 
-def test_not_sent_sur_erreur_reseau():
-    smtp = SmtpResult(accepted=False, code=None, error="port 25 filtré")
+def test_not_sent_sur_echec_connexion():
+    smtp = SmtpResult(accepted=False, code=None, error="port 25 filtré", stage="connect")
     assert classify_disposition(smtp, DeliveryResult()) is Disposition.NOT_SENT
+
+
+def test_send_error_sur_helo_refuse():
+    # Un HELO refusé est une erreur de NOTRE config, pas une défense de la cible.
+    # Ne doit surtout pas être lu comme « usurpation bloquée ».
+    smtp = SmtpResult(accepted=False, code=550, stage="helo", message="Invalid EHLO domain")
+    assert classify_disposition(smtp, DeliveryResult()) is Disposition.SEND_ERROR
+
+
+def test_rejet_5xx_au_rcpt_est_une_defense():
+    smtp = SmtpResult(accepted=False, code=550, stage="rcpt", message="DMARC reject")
+    assert classify_disposition(smtp, DeliveryResult()) is Disposition.REJECTED
 
 
 def test_dry_run():

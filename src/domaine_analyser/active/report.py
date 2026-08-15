@@ -17,6 +17,7 @@ _DISPOSITION_STYLE = {
     Disposition.DEFERRED: "cyan",
     Disposition.PENDING: "dim",
     Disposition.NOT_SENT: "magenta",
+    Disposition.SEND_ERROR: "bold magenta",
     Disposition.DRY_RUN: "dim",
 }
 

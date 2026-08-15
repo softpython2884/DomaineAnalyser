@@ -88,14 +88,22 @@ def get_scenarios(ids: tuple[str, ...] = ()) -> list[SpoofScenario]:
 
 
 def classify_disposition(smtp: SmtpResult, delivery: DeliveryResult) -> Disposition:
-    """Déduit ce qu'est devenu le message à partir des faits bruts."""
+    """Déduit ce qu'est devenu le message à partir des faits bruts.
+
+    L'étape d'échec (`stage`) prime sur le code : un refus au HELO est une
+    erreur de notre configuration, pas une défense de la cible ; une connexion
+    qui n'aboutit pas ne dit rien de la cible non plus.
+    """
     if smtp.accepted is None:
         return Disposition.DRY_RUN
+
     if not smtp.accepted:
-        if smtp.code is not None and 400 <= smtp.code < 500:
-            return Disposition.DEFERRED
-        if smtp.error and smtp.code is None:
+        if smtp.stage == "helo":
+            return Disposition.SEND_ERROR
+        if smtp.stage in ("resolve", "connect", "auth") or smtp.code is None:
             return Disposition.NOT_SENT
+        if 400 <= smtp.code < 500:
+            return Disposition.DEFERRED
         return Disposition.REJECTED
 
     # Accepté en SMTP : c'est la relecture IMAP qui tranche.
@@ -108,6 +116,7 @@ def interpret(
     scenario: SpoofScenario,
     disposition: Disposition,
     delivery: DeliveryResult,
+    smtp: SmtpResult,
     *,
     target: str,
     target_policy: str | None,
@@ -118,10 +127,20 @@ def interpret(
     if disposition is Disposition.DRY_RUN:
         return "Simulation : message construit, aucun envoi réel."
 
-    if disposition is Disposition.NOT_SENT:
+    if disposition is Disposition.SEND_ERROR:
+        detail = smtp.message or smtp.error or "refus au dialogue SMTP"
         return (
-            "Envoi impossible — souvent un port 25 sortant filtré. Lance le test "
-            "depuis une machine dont le port 25 est ouvert (ton serveur dédié)."
+            f"Le serveur a refusé notre envoi ({detail}). Ce n'est pas une défense "
+            "de la cible mais un réglage à corriger de notre côté : renseigne "
+            "DA_SEND_HELO avec un FQDN valide (le reverse DNS de la machine "
+            f"d'envoi ; auto-détecté : « {smtp.helo or 'aucun'} »)."
+        )
+
+    if disposition is Disposition.NOT_SENT:
+        reason = smtp.error or "MX injoignable"
+        return (
+            f"Connexion impossible ({reason}) — souvent un port 25 sortant filtré. "
+            "Lance le test depuis une machine dont le port 25 est ouvert."
         )
 
     if disposition is Disposition.REJECTED:
@@ -195,7 +214,7 @@ def build_result(
 ) -> ScenarioResult:
     disposition = classify_disposition(smtp, delivery)
     interpretation = interpret(
-        scenario, disposition, delivery, target=target, target_policy=target_policy
+        scenario, disposition, delivery, smtp, target=target, target_policy=target_policy
     )
     return ScenarioResult(
         scenario=scenario,

@@ -38,13 +38,14 @@ class SpoofScenario:
 class Disposition(str, Enum):
     """Ce que le serveur récepteur a fait du message."""
 
-    REJECTED = "rejected"  # refusé pendant la session SMTP (5xx)
+    REJECTED = "rejected"  # refusé par le récepteur (MAIL/RCPT/DATA en 5xx)
     DROPPED = "dropped"  # accepté puis disparu (ni inbox ni spam)
     QUARANTINE = "quarantine"  # rangé en indésirables
     DELIVERED = "delivered"  # arrivé en boîte de réception
     DEFERRED = "deferred"  # différé (4xx / greylisting)
     PENDING = "pending"  # envoi effectué, vérification non concluante
-    NOT_SENT = "not_sent"  # échec d'envoi (réseau, port 25 filtré…)
+    NOT_SENT = "not_sent"  # connexion impossible (port 25 filtré, MX injoignable)
+    SEND_ERROR = "send_error"  # notre configuration d'envoi est fautive (HELO…)
     DRY_RUN = "dry_run"  # simulation, aucun envoi réel
 
     @property
@@ -64,7 +65,8 @@ _DISPOSITION_LABEL: dict[Disposition, str] = {
     Disposition.DELIVERED: "Délivré en boîte de réception",
     Disposition.DEFERRED: "Différé (greylisting ?)",
     Disposition.PENDING: "Indéterminé",
-    Disposition.NOT_SENT: "Non envoyé",
+    Disposition.NOT_SENT: "Non envoyé (injoignable)",
+    Disposition.SEND_ERROR: "Erreur d'envoi (config)",
     Disposition.DRY_RUN: "Simulation",
 }
 
@@ -101,6 +103,10 @@ class SmtpResult:
     error: str | None = None
     mx_host: str | None = None
     used_starttls: bool = False
+    #: Étape où l'échec s'est produit : resolve, connect, helo, mailfrom, rcpt,
+    #: data. Décisif pour distinguer « injoignable » de « refusé par le serveur ».
+    stage: str | None = None
+    helo: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -110,6 +116,8 @@ class SmtpResult:
             "error": self.error,
             "mx_host": self.mx_host,
             "used_starttls": self.used_starttls,
+            "stage": self.stage,
+            "helo": self.helo,
         }
 
 

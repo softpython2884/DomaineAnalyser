@@ -31,14 +31,15 @@ DEFAULT_SCENARIOS: tuple[SpoofScenario, ...] = (
         mode=ForgeMode.EXACT,
     ),
     SpoofScenario(
-        id="header-only",
-        name="En-tête From désaligné",
+        id="realistic",
+        name="Usurpation réaliste (attaquant)",
         goal=(
-            "Enveloppe sur un domaine anodin, mais From: affichant la cible. "
-            "Isole l'alignement de l'en-tête From — ce que voit l'utilisateur — "
-            "que seul DMARC protège."
+            "Le spoof qu'un vrai attaquant enverrait : nom d'affichage crédible "
+            "(« Cible <no-reply@cible> »), sujet neutre, corps HTML bénin, aucun "
+            "signal auto-infligé. Mesure ce qui passe réellement quand seule la "
+            "défense anti-usurpation du récepteur est en jeu."
         ),
-        mode=ForgeMode.HEADER_ONLY,
+        mode=ForgeMode.REALISTIC,
     ),
     SpoofScenario(
         id="subdomain",

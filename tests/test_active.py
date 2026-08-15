@@ -97,18 +97,33 @@ def test_message_exact_aligne_enveloppe_et_entete():
     assert msg.envelope_from == "security-test@paypal.com"
 
 
-def test_message_header_only_desaligne_lenveloppe():
-    sc = _scenario(ForgeMode.HEADER_ONLY)
+def test_message_realistic_a_nom_daffichage_et_corps_html():
+    sc = _scenario(ForgeMode.REALISTIC)
+    msg = build_forged_message(sc, target="solutions-corp.org", mailbox=MAILBOX, token="DAT-abc123")
+    # nom d'affichage plausible dérivé du domaine + adresse sur la cible
+    assert "Solutions Corp" in msg.from_header
+    assert "no-reply@solutions-corp.org" in msg.from_header
+    assert msg.envelope_from == "no-reply@solutions-corp.org"
+    # sujet crédible SANS jeton (corrélation par en-tête), corps multipart HTML
+    assert "DAT-" not in msg.subject
+    raw = msg.raw.decode()
+    assert "text/html" in raw
+    assert "DAT-abc123" in raw  # le jeton reste traçable dans l'en-tête + le pied
+
+
+def test_message_sous_domaine_enveloppe_sur_la_cible():
+    sc = _scenario(ForgeMode.SUBDOMAIN)
     msg = build_forged_message(sc, target="paypal.com", mailbox=MAILBOX, token="DAT-abc123")
-    assert msg.from_header == "security-test@paypal.com"
-    # enveloppe rebasculée sur le domaine contrôlé => reste livrable
-    assert msg.envelope_from.endswith("@capibara.fr")
+    assert msg.from_header.endswith(".paypal.com")
+    # enveloppe sur le domaine cible (résolvable, jamais notre domaine local)
+    assert msg.envelope_from.endswith("@paypal.com")
+    assert "capibara.fr" not in msg.envelope_from
 
 
 def test_message_display_name_adresse_honnete():
     sc = _scenario(ForgeMode.DISPLAY_NAME)
     msg = build_forged_message(sc, target="paypal.com", mailbox=MAILBOX, token="DAT-abc123")
-    assert "paypal.com" in msg.from_header  # nom trompeur
+    assert "Paypal" in msg.from_header  # nom trompeur
     assert "failtest@capibara.fr" in msg.from_header  # adresse honnête
     assert msg.envelope_from == "failtest@capibara.fr"
 

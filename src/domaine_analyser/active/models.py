@@ -17,8 +17,8 @@ from typing import Any
 class ForgeMode(str, Enum):
     """Comment l'expéditeur est falsifié dans un scénario."""
 
-    EXACT = "exact"  # From: et enveloppe = domaine cible
-    HEADER_ONLY = "header_only"  # From: = cible, enveloppe = domaine contrôlé
+    EXACT = "exact"  # From: et enveloppe = domaine cible, adresse nue
+    REALISTIC = "realistic"  # spoof soigné : nom d'affichage, sujet et corps crédibles
     SUBDOMAIN = "subdomain"  # From: = sous-domaine inexistant de la cible
     LOOKALIKE = "lookalike"  # From: = domaine sosie de la cible
     DISPLAY_NAME = "display_name"  # nom d'affichage trompeur, adresse honnête

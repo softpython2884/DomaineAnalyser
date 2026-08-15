@@ -136,9 +136,10 @@ def _scan_folder(
         status, _ = conn.select(_quote(folder), readonly=True)
         if status != "OK":
             return results
-        # Tous nos sujets contiennent le préfixe de jeton « DAT- » : une seule
-        # recherche par dossier suffit, on trie ensuite par jeton.
-        status, data = conn.search(None, "SUBJECT", "DAT-")
+        # Corrélation par en-tête, pas par sujet : les messages réalistes ont un
+        # sujet crédible sans jeton. L'en-tête X-DomaineAnalyser-Test porte
+        # toujours « DAT-… » ; une recherche par dossier suffit, on trie ensuite.
+        status, data = conn.search(None, "HEADER", "X-DomaineAnalyser-Test", "DAT-")
     except imaplib.IMAP4.error:
         return results
     if status != "OK" or not data or not data[0]:
@@ -211,7 +212,7 @@ def cleanup_tokens(mailbox: MailboxAccess, tokens: set[str]) -> int:
             try:
                 if conn.select(_quote(folder))[0] != "OK":
                     continue
-                status, data = conn.search(None, "SUBJECT", "DAT-")
+                status, data = conn.search(None, "HEADER", "X-DomaineAnalyser-Test", "DAT-")
                 if status != "OK" or not data or not data[0]:
                     continue
                 for num in data[0].split():

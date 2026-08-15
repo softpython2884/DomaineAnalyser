@@ -121,16 +121,16 @@ def _send_direct(
     conn_error: str | None = None
 
     for host in mx_hosts:
-        server = smtplib.SMTP(timeout=config.timeout)
-        server.local_hostname = helo
         try:
-            server.connect(host, _SMTP_PORT)
+            # Le host DOIT passer par le constructeur : c'est lui qui renseigne
+            # self._host, ensuite réutilisé comme nom SNI par STARTTLS. Sans ça,
+            # le handshake TLS lève « server_hostname cannot be empty ». La
+            # connexion (et ses éventuelles erreurs) a lieu ici même.
+            server = smtplib.SMTP(host, _SMTP_PORT, local_hostname=helo, timeout=config.timeout)
         except (OSError, smtplib.SMTPException) as exc:
             # Échec au niveau connexion : on tente le MX suivant. Cause la plus
             # fréquente : port 25 sortant filtré, ou MX injoignable.
             conn_error = f"{type(exc).__name__}: {exc}"
-            with contextlib.suppress(Exception):
-                server.close()
             continue
 
         # Connexion établie : au-delà, une erreur est un refus du serveur, pas
@@ -180,8 +180,10 @@ def _handshake_and_send(
             server.starttls(context=_unverified_context())
             server.ehlo()
             used_tls = True
-        except (smtplib.SMTPException, ssl.SSLError):
+        except (smtplib.SMTPException, ssl.SSLError, ValueError, OSError):
             # STARTTLS a échoué : on poursuit en clair, la remise reste possible.
+            # ValueError couvre les cas de nom SNI invalide ; on ne laisse jamais
+            # un incident TLS faire tomber toute la campagne.
             pass
 
     return _transact(server, message, recipient, host, helo, used_tls)
@@ -197,11 +199,16 @@ def _send_via_relay(config: SendConfig, message: ForgedMessage, recipient: str) 
     try:
         if config.relay_port == 465:
             server: smtplib.SMTP = smtplib.SMTP_SSL(
-                config.relay_host, 465, timeout=config.timeout, context=ssl.create_default_context()
+                config.relay_host,
+                465,
+                local_hostname=helo,
+                timeout=config.timeout,
+                context=ssl.create_default_context(),
             )
         else:
-            server = smtplib.SMTP(config.relay_host, config.relay_port, timeout=config.timeout)
-        server.local_hostname = helo
+            server = smtplib.SMTP(
+                config.relay_host, config.relay_port, local_hostname=helo, timeout=config.timeout
+            )
         with server:
             server.ehlo_or_helo_if_needed()
             used_tls = config.relay_port == 465

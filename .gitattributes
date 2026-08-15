@@ -1,0 +1,28 @@
+# Normalisation des fins de ligne.
+#
+# Sans ces règles, un clone sous Windows convertit install.sh en CRLF — bash
+# refuse alors de l'exécuter (« bad interpreter: /usr/bin/env bash^M ») — et un
+# clone sous Linux laisse install.cmd en LF, ce que l'analyseur de cmd.exe ne
+# sait pas lire : il découpe les lignes au mauvais endroit et exécute des
+# fragments de commandes. Les deux pannes sont déroutantes et n'apparaissent
+# qu'après publication.
+
+* text=auto
+
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+*.sh  text eol=lf
+*.py  text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+*.toml text eol=lf
+*.md   text eol=lf
+
+# Fichiers binaires : aucune conversion.
+*.png binary
+*.jpg binary
+*.gz  binary
+*.zip binary
+*.sqlite binary

@@ -1,0 +1,355 @@
+# Base de reconnaissance des services rattachés à un domaine.
+#
+# La détection croise quatre signaux indépendants. Le plus révélateur est le
+# dernier : un jeton de vérification TXT survit très souvent au service qu'il
+# autorisait. Il trahit alors un accès resté ouvert, oublié depuis des années.
+#
+#   mx            suffixe d'un hôte MX
+#   spf_includes  cible d'un mécanisme include: / redirect=
+#   dkim_prefix   préfixe de sélecteur DKIM publié
+#   txt_tokens    préfixe d'un jeton de vérification dans un TXT du domaine
+#
+# Champs :
+#   kind                 mailbox | esp | gateway | dns | other
+#   can_send_as_domain   le service peut émettre en affichant ce domaine
+#                        en expéditeur ; c'est ce qui définit la surface
+#                        d'usurpation légitime à surveiller.
+#
+# Correspondances insensibles à la casse. Les suffixes MX correspondent sur
+# une frontière de label (« l.google.com » ne matche pas « notgoogle.com »).
+
+version: 1
+
+providers:
+  # ---------------------------------------------------------------------
+  # Boîtes aux lettres
+  # ---------------------------------------------------------------------
+  - name: Google Workspace
+    kind: mailbox
+    can_send_as_domain: true
+    mx: [aspmx.l.google.com, googlemail.com, aspmx2.googlemail.com, smtp.google.com]
+    spf_includes: [_spf.google.com, _netblocks.google.com, aspmx.googlemail.com]
+    dkim_prefix: [google]
+    txt_tokens: ["google-site-verification="]
+
+  - name: Microsoft 365
+    kind: mailbox
+    can_send_as_domain: true
+    mx: [mail.protection.outlook.com, mail.eo.outlook.com]
+    spf_includes: [spf.protection.outlook.com, spf.messaging.microsoft.com]
+    dkim_prefix: [selector1, selector2]
+    txt_tokens: ["MS=", "ms-domain-verification="]
+
+  - name: OVHcloud
+    kind: mailbox
+    can_send_as_domain: true
+    mx: [mail.ovh.net, mx0.mail.ovh.net, mx1.mail.ovh.net, mx2.mail.ovh.net, mx3.mail.ovh.net, ovh.net]
+    spf_includes: [mx.ovh.com, spf.mail.ovh.net]
+    dkim_prefix: [ovhmo]
+    txt_tokens: ["ovh-domain-verification="]
+
+  - name: Proton Mail
+    kind: mailbox
+    can_send_as_domain: true
+    mx: [protonmail.ch, mail.protonmail.ch, mailsec.protonmail.ch, protonmail.com]
+    spf_includes: [_spf.protonmail.ch]
+    dkim_prefix: [protonmail]
+    txt_tokens: ["protonmail-verification="]
+
+  - name: Zoho Mail
+    kind: mailbox
+    can_send_as_domain: true
+    mx: [zoho.com, zoho.eu, mx.zoho.com, mx2.zoho.com, mx3.zoho.com, zohomail.com]
+    spf_includes: [zoho.com, zoho.eu, zohomail.com]
+    dkim_prefix: [zoho, zmail]
+    txt_tokens: ["zoho-verification=", "zoho-domain-verification="]
+
+  - name: Infomaniak
+    kind: mailbox
+    can_send_as_domain: true
+    mx: [infomaniak.ch, mail.infomaniak.ch]
+    spf_includes: [spf.infomaniak.ch]
+    dkim_prefix: [infomaniak]
+    txt_tokens: []
+
+  - name: Gandi
+    kind: mailbox
+    can_send_as_domain: true
+    mx: [mail.gandi.net, spool.mail.gandi.net, fb.mail.gandi.net]
+    spf_includes: [_mailcust.gandi.net, spf.mail.gandi.net]
+    dkim_prefix: [gm1, gm2]
+    txt_tokens: []
+
+  - name: Fastmail
+    kind: mailbox
+    can_send_as_domain: true
+    mx: [messagingengine.com, fastmail.com]
+    spf_includes: [spf.messagingengine.com]
+    dkim_prefix: [fm1, fm2, fm3, mesmtp]
+    txt_tokens: []
+
+  - name: Yandex Mail
+    kind: mailbox
+    can_send_as_domain: true
+    mx: [mx.yandex.net, mx.yandex.ru]
+    spf_includes: [_spf.yandex.net, _spf.yandex.ru]
+    dkim_prefix: [mail]
+    txt_tokens: ["yandex-verification="]
+
+  - name: Free / Online
+    kind: mailbox
+    can_send_as_domain: true
+    mx: [mx1.free.fr, mx2.free.fr]
+    spf_includes: [spf.free.fr]
+    dkim_prefix: []
+    txt_tokens: []
+
+  # ---------------------------------------------------------------------
+  # Plateformes d'envoi (marketing et transactionnel)
+  # ---------------------------------------------------------------------
+  - name: Brevo
+    kind: esp
+    can_send_as_domain: true
+    shared_pool: true
+    mx: [mail.brevo.com, relay.brevo.com, mail.sendinblue.com]
+    spf_includes: [spf.brevo.com, spf.sendinblue.com]
+    dkim_prefix: [brevo, sib, mail]
+    txt_tokens: ["brevo-code:", "Sendinblue-code:", "brevo-code="]
+
+  - name: Cloudflare Email
+    kind: esp
+    can_send_as_domain: true
+    mx: [mx.cloudflare.net, amir.mx.cloudflare.net, linda.mx.cloudflare.net, isaac.mx.cloudflare.net]
+    spf_includes: [_spf.mx.cloudflare.net]
+    dkim_prefix: [cf]
+    txt_tokens: ["cloudflare-verify="]
+
+  - name: Amazon SES
+    kind: esp
+    can_send_as_domain: true
+    shared_pool: true
+    mx: [inbound-smtp.us-east-1.amazonaws.com, amazonses.com]
+    spf_includes: [amazonses.com]
+    dkim_prefix: [amazonses]
+    txt_tokens: ["amazonses:"]
+
+  - name: SendGrid
+    kind: esp
+    can_send_as_domain: true
+    shared_pool: true
+    mx: [mx.sendgrid.net]
+    spf_includes: [sendgrid.net, sendgrid.info]
+    dkim_prefix: [s1, s2, smtpapi]
+    txt_tokens: []
+
+  - name: Mailchimp / Mandrill
+    kind: esp
+    can_send_as_domain: true
+    shared_pool: true
+    mx: [mailchimpapp.net]
+    spf_includes: [servers.mcsv.net, spf.mandrillapp.com]
+    dkim_prefix: [k1, k2, k3, mandrill, mte1, mte2]
+    txt_tokens: []
+
+  - name: Mailgun
+    kind: esp
+    can_send_as_domain: true
+    shared_pool: true
+    mx: [mxa.mailgun.org, mxb.mailgun.org]
+    spf_includes: [mailgun.org, spf.mailgun.org]
+    dkim_prefix: [mailo, smtp, k1, pic, mailgun]
+    txt_tokens: []
+
+  - name: Mailjet
+    kind: esp
+    can_send_as_domain: true
+    shared_pool: true
+    mx: [in.mailjet.com]
+    spf_includes: [spf.mailjet.com]
+    dkim_prefix: [mailjet]
+    txt_tokens: ["mailjet-domain-validation="]
+
+  - name: Postmark
+    kind: esp
+    can_send_as_domain: true
+    mx: [inbound.postmarkapp.com]
+    spf_includes: [spf.mtasv.net]
+    dkim_prefix: [pm, pm2]
+    txt_tokens: []
+
+  - name: HubSpot
+    kind: esp
+    can_send_as_domain: true
+    mx: []
+    spf_includes: [_spf.hubspot.net, mail.hubspot.net]
+    dkim_prefix: [hs1, hs2]
+    txt_tokens: ["hubspot-developer-verification="]
+
+  - name: Salesforce
+    kind: esp
+    can_send_as_domain: true
+    mx: []
+    spf_includes: [_spf.salesforce.com, _spf.exacttarget.com]
+    dkim_prefix: [sfdc, exacttarget]
+    txt_tokens: []
+
+  - name: Klaviyo
+    kind: esp
+    can_send_as_domain: true
+    mx: []
+    spf_includes: [_spf.klaviyomail.com]
+    dkim_prefix: [kl, kl2]
+    txt_tokens: []
+
+  - name: ActiveCampaign
+    kind: esp
+    can_send_as_domain: true
+    shared_pool: true
+    mx: []
+    spf_includes: [emsd1.com, _spf.activecampaign.com]
+    dkim_prefix: [ac, dk]
+    txt_tokens: []
+
+  - name: Zendesk
+    kind: esp
+    can_send_as_domain: true
+    mx: [mx.zendesk.com, mail.zendesk.com]
+    spf_includes: [mail.zendesk.com]
+    dkim_prefix: [zendesk1, zendesk2]
+    txt_tokens: ["zendesk-verification="]
+
+  - name: Intercom
+    kind: esp
+    can_send_as_domain: true
+    mx: []
+    spf_includes: [_spf.intercom.io]
+    dkim_prefix: [intercom]
+    txt_tokens: []
+
+  - name: Freshworks
+    kind: esp
+    can_send_as_domain: true
+    mx: [mx.freshemail.io]
+    spf_includes: [email.freshdesk.com, _spf.freshemail.io]
+    dkim_prefix: [fd, freshdesk]
+    txt_tokens: []
+
+  - name: Sendcloud / SMTP2GO
+    kind: esp
+    can_send_as_domain: true
+    shared_pool: true
+    mx: []
+    spf_includes: [spf.smtp2go.com]
+    dkim_prefix: [s2g, smtp2go]
+    txt_tokens: []
+
+  - name: Mailerlite
+    kind: esp
+    can_send_as_domain: true
+    shared_pool: true
+    mx: []
+    spf_includes: [_spf.mlsend.com]
+    dkim_prefix: [ml]
+    txt_tokens: []
+
+  - name: Odoo
+    kind: esp
+    can_send_as_domain: true
+    mx: []
+    spf_includes: [_spf.odoo.com]
+    dkim_prefix: [odoo]
+    txt_tokens: []
+
+  # ---------------------------------------------------------------------
+  # Passerelles de sécurité
+  # ---------------------------------------------------------------------
+  - name: Proofpoint
+    kind: gateway
+    can_send_as_domain: false
+    mx: [pphosted.com, ppe-hosted.com]
+    spf_includes: [_spf.pphosted.com]
+    dkim_prefix: [ppdkim]
+    txt_tokens: []
+
+  - name: Mimecast
+    kind: gateway
+    can_send_as_domain: false
+    mx: [mimecast.com, mimecast.co.za]
+    spf_includes: [_netblocks.mimecast.com]
+    dkim_prefix: [mimecast]
+    txt_tokens: ["mimecast-domain-verification="]
+
+  - name: Barracuda
+    kind: gateway
+    can_send_as_domain: false
+    mx: [barracudanetworks.com, ess.barracudanetworks.com]
+    spf_includes: [spf.ess.barracudanetworks.com]
+    dkim_prefix: [barracuda]
+    txt_tokens: []
+
+  - name: Cisco / IronPort
+    kind: gateway
+    can_send_as_domain: false
+    mx: [iphmx.com, cisco.com]
+    spf_includes: [spf.iphmx.com]
+    dkim_prefix: []
+    txt_tokens: []
+
+  - name: Vade / Altospam
+    kind: gateway
+    can_send_as_domain: false
+    mx: [vadesecure.com, altospam.com, mailsecure.fr]
+    spf_includes: [spf.vadesecure.com, spf.altospam.com]
+    dkim_prefix: []
+    txt_tokens: []
+
+  # ---------------------------------------------------------------------
+  # Autres jetons de vérification fréquents
+  # ---------------------------------------------------------------------
+  - name: Atlassian
+    kind: other
+    can_send_as_domain: false
+    mx: []
+    spf_includes: [_spf.atlassian.net]
+    dkim_prefix: []
+    txt_tokens: ["atlassian-domain-verification="]
+
+  - name: Meta / Facebook
+    kind: other
+    can_send_as_domain: false
+    mx: []
+    spf_includes: []
+    dkim_prefix: []
+    txt_tokens: ["facebook-domain-verification="]
+
+  - name: Adobe
+    kind: other
+    can_send_as_domain: false
+    mx: []
+    spf_includes: [adobe.com]
+    dkim_prefix: []
+    txt_tokens: ["adobe-idp-site-verification=", "adobe-sign-verification="]
+
+  - name: Docusign
+    kind: esp
+    can_send_as_domain: true
+    mx: []
+    spf_includes: [spf.docusign.net]
+    dkim_prefix: [dsdkim]
+    txt_tokens: ["docusign="]
+
+  - name: Stripe
+    kind: esp
+    can_send_as_domain: true
+    mx: []
+    spf_includes: [_spf.stripe.com]
+    dkim_prefix: [stripe]
+    txt_tokens: ["stripe-verification="]
+
+  - name: Shopify
+    kind: esp
+    can_send_as_domain: true
+    mx: []
+    spf_includes: [shops.shopify.com]
+    dkim_prefix: [shopify]
+    txt_tokens: ["shopify-verification-code="]

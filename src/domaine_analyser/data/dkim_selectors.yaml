@@ -1,0 +1,116 @@
+# Dictionnaire de sélecteurs DKIM à sonder.
+#
+# DKIM n'offre aucun moyen d'énumérer les sélecteurs publiés par un domaine :
+# il faut deviner le nom, puis interroger « <sélecteur>._domainkey.<domaine> ».
+# Ce dictionnaire couvre les conventions des principaux fournisseurs.
+#
+# Il reste par construction incomplet : un sélecteur aléatoire (Amazon SES en
+# génère) est indevinable. La découverte fiable vient des rapports agrégés
+# DMARC, qui contiennent les sélecteurs réellement utilisés par chaque
+# émetteur — y compris ceux de prestataires dont le propriétaire du domaine
+# ignore l'existence. Voir la commande « da dmarc ».
+#
+# tier « default » : sondé systématiquement.
+# tier « deep »    : sondé uniquement avec --deep (plus lent, plus couvrant).
+
+version: 1
+
+# Sélecteurs propres à un fournisseur. La correspondance sert aussi à
+# attribuer une clé découverte au service qui l'a publiée.
+providers:
+  Google Workspace: [google]
+  Microsoft 365: [selector1, selector2]
+  Proton Mail: [protonmail, protonmail2, protonmail3]
+  Zoho Mail: [zoho, zmail, zohomail]
+  Brevo: [brevo1, brevo2, sib, sib1, sib2]
+  Amazon SES: [amazonses]
+  SendGrid: [s1, s2, smtpapi]
+  Mailchimp / Mandrill: [k1, k2, k3, mandrill, mte1, mte2]
+  Mailgun: [mailo, pic, mailgun, mg]
+  Mailjet: [mailjet]
+  Postmark: [pm, pm2]
+  Zendesk: [zendesk1, zendesk2]
+  HubSpot: [hs1, hs2]
+  Klaviyo: [kl, kl2]
+  Fastmail: [fm1, fm2, fm3, mesmtp]
+  Gandi: [gm1, gm2]
+  Salesforce: [sfdc, exacttarget]
+  Docusign: [dsdkim, dkim1, dkim2]
+  Stripe: [stripe]
+  Shopify: [shopify]
+  Freshworks: [fd, freshdesk]
+  Intercom: [intercom]
+  Odoo: [odoo]
+  Infomaniak: [infomaniak]
+  Mimecast: [mimecast]
+  Proofpoint: [ppdkim]
+
+# Sélecteurs génériques, non attribuables a priori à un fournisseur.
+generic:
+  default:
+    - default
+    - dkim
+    - mail
+    - email
+    - selector
+    - key1
+    - key2
+    - k1
+    - s1
+    - s2
+    - smtp
+    - dk
+    - dkim1
+    - dkim2
+  deep:
+    - selector3
+    - sel1
+    - sel2
+    - mx
+    - mailer
+    - main
+    - primary
+    - secondary
+    - private
+    - public
+    - dkimkey
+    - domainkey
+    - beta
+    - test
+    - prod
+    - production
+    - marketing
+    - transactional
+    - newsletter
+    - notification
+    - noreply
+    - service
+    - corp
+    - ed25519
+    - rsa
+
+# Sélecteurs construits à l'exécution.
+#
+# Cloudflare nomme ses sélecteurs d'après l'année de génération de la clé
+# (« cf2024-1 ») : impossible à figer dans une liste, il faut les dériver de
+# la date courante. C'est le motif « cfXXXX » recherché.
+dynamic:
+  - provider: Cloudflare Email
+    template: "cf{year}-{index}"
+    years_back: 4
+    max_index: 3
+    tier: default
+
+  # Convention date fréquente chez Google Workspace et plusieurs plateformes :
+  # un sélecteur nommé d'après le mois de rotation de la clé.
+  - provider: null
+    template: "{year}{month:02d}"
+    years_back: 3
+    months: true
+    tier: deep
+
+  - provider: null
+    template: "{year}{month:02d}01"
+    years_back: 2
+    months: true
+    tier: deep

@@ -18,7 +18,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 
-from ..analyze.dmarc import analyze_dmarc
+from ..analyze.dmarc import analyze_dmarc, organizational_domain
 from ..config import Settings
 from ..net.resolver import DnsResolver
 from . import imap_verify, message, safety, scenarios, smtp_send
@@ -89,6 +89,20 @@ def run_spoof_campaign(
 
     campaign.target_policy = _target_policy(resolver, target)
 
+    # Garde-fou : usurper un domaine vers une boîte hébergée sur le serveur de
+    # ce même domaine ne mesure rien de fiable. Le récepteur traite le message
+    # comme local (il peut le signer et court-circuiter DMARC), et le verdict
+    # n'a alors aucun rapport avec ce qu'un récepteur externe ferait.
+    if organizational_domain(target) == organizational_domain(mailbox.domain):
+        campaign.notes.append(
+            f"⚠️ La cible et la boîte de vérification partagent le domaine "
+            f"organisationnel « {organizational_domain(target)} » : le serveur récepteur "
+            "traite ces messages comme du courrier local (signature locale, DMARC "
+            "non appliqué). Ce test ne reflète PAS la protection contre une usurpation "
+            "externe — utilise une boîte chez un autre hébergeur (Gmail…) pour tester "
+            "ce domaine."
+        )
+
     all_scenarios = selected if selected is not None else scenarios.get_scenarios()
     budget = safety.enforce_message_budget(len(all_scenarios), mail_config.max_messages)
     run_list = all_scenarios[:budget]
@@ -129,9 +143,11 @@ def run_spoof_campaign(
     deliveries: dict[str, DeliveryResult] = {}
     if not dry_run and any(o[2].accepted for o in outcomes):
         emit("verify", f"attente des messages en IMAP (≤ {mail_config.verify_timeout:.0f}s)…")
+        diag: list[str] = []
         deliveries = imap_verify.wait_for_tokens(
-            mailbox, tokens, timeout=mail_config.verify_timeout
+            mailbox, tokens, timeout=mail_config.verify_timeout, diagnostics=diag
         )
+        campaign.notes.extend(diag)
 
     # -- 4. verdict ---------------------------------------------------------
     for scenario, forged, smtp in outcomes:

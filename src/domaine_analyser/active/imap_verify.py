@@ -6,6 +6,12 @@ contrôle, condition sans laquelle aucune campagne ne démarre. Le second est la
 mesure : retrouver chaque message-test par son jeton, déterminer son dossier de
 dépôt (réception ou indésirables) et extraire les verdicts d'authentification
 que le serveur récepteur a inscrits — la source de vérité du test.
+
+La recherche est volontairement robuste et indépendante des extensions du
+serveur : on parcourt *tous* les dossiers, on liste les messages récents par
+date (`SINCE`, universellement supporté) et on filtre le jeton nous-mêmes sur
+l'en-tête. Une recherche serveur par sujet ou par en-tête arbitraire échouait
+silencieusement sur certaines implémentations (dont Stalwart).
 """
 
 from __future__ import annotations
@@ -14,6 +20,7 @@ import contextlib
 import imaplib
 import re
 import time
+from datetime import datetime, timedelta
 from email.message import Message
 from email.parser import BytesParser
 from email.policy import default as default_policy
@@ -22,11 +29,15 @@ from .models import AuthResults, DeliveryResult
 from .settings import MailboxAccess
 
 #: Motifs de dossiers d'indésirables, à défaut de drapeau \Junk exploitable.
-_JUNK_HINTS = ("junk", "spam", "bulk", "indésir", "unwanted")
+_JUNK_HINTS = ("junk", "spam", "bulk", "indésir", "indesir", "unwanted", "courrier ind")
 
-_AUTH_FIELD = re.compile(
-    r"\b(spf|dkim|dmarc|compauth)\s*=\s*([a-z]+)", re.IGNORECASE
+#: Abréviations de mois IMAP — imposées en anglais par la RFC 3501, alors que
+#: strftime('%b') suivrait la locale du système (« août » casserait la requête).
+_IMAP_MONTHS = (
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 )
+
+_AUTH_FIELD = re.compile(r"\b(spf|dkim|dmarc|compauth)\s*=\s*([a-z]+)", re.IGNORECASE)
 
 
 class ImapError(Exception):
@@ -53,32 +64,44 @@ def _connect(mailbox: MailboxAccess) -> imaplib.IMAP4:
     return conn
 
 
-def _discover_folders(conn: imaplib.IMAP4) -> list[tuple[str, bool]]:
-    """Liste (nom, est_indésirable) des dossiers à examiner.
+def _imap_since_date(days_back: int = 1) -> str:
+    """Date « SINCE » au format IMAP (JJ-Mon-AAAA), avec une marge de sûreté."""
+    day = datetime.now() - timedelta(days=days_back)
+    return f"{day.day:02d}-{_IMAP_MONTHS[day.month - 1]}-{day.year}"
 
-    La réception passe en premier ; on ajoute tout dossier marqué \\Junk ou dont
-    le nom évoque les indésirables. Distinguer les deux est essentiel : « en
-    réception » et « en spam » sont deux verdicts opposés.
+
+def _discover_folders(conn: imaplib.IMAP4) -> list[tuple[str, bool]]:
+    """Liste (nom, est_indésirable) de TOUS les dossiers, réception en tête.
+
+    On examine tous les dossiers plutôt que la seule paire réception/Junk : un
+    message classé dans un dossier au nom inattendu ne doit jamais être compté
+    comme « disparu ». Le drapeau d'indésirable ne sert qu'à distinguer
+    « reçu » de « spam » dans le verdict.
     """
-    folders: list[tuple[str, bool]] = [("INBOX", False)]
+    folders: list[tuple[str, bool]] = []
+    seen: set[str] = set()
+
     try:
         status, data = conn.list()
     except imaplib.IMAP4.error:
-        return folders
-    if status != "OK":
-        return folders
+        status, data = "NO", []
 
-    for raw in data:
-        if not raw:
-            continue
-        line = raw.decode(errors="replace") if isinstance(raw, bytes) else str(raw)
-        flags = line.lower()
-        name = _folder_name(line)
-        if not name or name.upper() == "INBOX":
-            continue
-        is_junk = "\\junk" in flags or any(h in name.lower() for h in _JUNK_HINTS)
-        if is_junk:
-            folders.append((name, True))
+    if status == "OK":
+        for raw in data or []:
+            if not raw:
+                continue
+            line = raw.decode(errors="replace") if isinstance(raw, bytes) else str(raw)
+            name = _folder_name(line)
+            if not name or name.upper() in seen:
+                continue
+            seen.add(name.upper())
+            is_junk = "\\junk" in line.lower() or any(h in name.lower() for h in _JUNK_HINTS)
+            folders.append((name, is_junk))
+
+    if "INBOX" not in seen:
+        folders.insert(0, ("INBOX", False))
+    # Réception toujours en premier.
+    folders.sort(key=lambda item: item[0].upper() != "INBOX")
     return folders
 
 
@@ -88,7 +111,8 @@ def _folder_name(list_line: str) -> str:
     quoted = re.findall(r'"((?:[^"\\]|\\.)*)"', list_line)
     if quoted:
         return quoted[-1].replace('\\"', '"')
-    return list_line.split()[-1] if list_line.split() else ""
+    parts = list_line.split()
+    return parts[-1] if parts else ""
 
 
 def wait_for_tokens(
@@ -98,25 +122,34 @@ def wait_for_tokens(
     timeout: float,
     poll_interval: float = 5.0,
     now: float | None = None,
+    diagnostics: list[str] | None = None,
 ) -> dict[str, DeliveryResult]:
     """Attend l'arrivée des messages identifiés par `tokens`.
 
-    Interroge en boucle réception et indésirables jusqu'à ce que tous les jetons
-    soient trouvés ou que le délai expire. Les jetons non trouvés restent
-    absents du résultat : pour eux, le message n'est jamais arrivé.
+    Interroge en boucle tous les dossiers jusqu'à ce que tous les jetons soient
+    trouvés ou que le délai expire. Les jetons non trouvés restent absents du
+    résultat : pour eux, le message n'est jamais arrivé. `diagnostics`, si
+    fourni, reçoit un résumé (dossiers examinés, nombre de messages-test vus).
     """
     found: dict[str, DeliveryResult] = {}
     conn = _connect(mailbox)
+    since = _imap_since_date()
+    scanned: list[str] = []
+    total_seen = 0
     try:
         folders = _discover_folders(conn)
+        scanned = [name for name, _ in folders]
         deadline = (now if now is not None else time.monotonic()) + timeout
         while True:
             remaining = tokens - found.keys()
             if not remaining:
                 break
+            round_seen = 0
             for folder, is_junk in folders:
-                for token, result in _scan_folder(conn, folder, is_junk, remaining).items():
-                    found[token] = result
+                results, seen = _scan_folder(conn, folder, is_junk, remaining, since)
+                found.update(results)
+                round_seen += seen
+            total_seen = max(total_seen, round_seen)
             if tokens - found.keys() and time.monotonic() < deadline:
                 time.sleep(poll_interval)
             else:
@@ -124,27 +157,35 @@ def wait_for_tokens(
     finally:
         with contextlib.suppress(Exception):
             conn.logout()
+
+    if diagnostics is not None:
+        diagnostics.append(
+            f"IMAP : dossiers examinés = {', '.join(scanned) or 'aucun'} ; "
+            f"messages-test vus = {total_seen}"
+        )
     return found
 
 
 def _scan_folder(
-    conn: imaplib.IMAP4, folder: str, is_junk: bool, wanted: set[str]
-) -> dict[str, DeliveryResult]:
-    """Cherche les messages-tests dans un dossier et les analyse."""
+    conn: imaplib.IMAP4, folder: str, is_junk: bool, wanted: set[str], since: str
+) -> tuple[dict[str, DeliveryResult], int]:
+    """Cherche les messages-tests récents d'un dossier et les analyse.
+
+    Returns:
+        Les correspondances trouvées, et le nombre total de messages-test
+        DomaineAnalyser aperçus dans le dossier (pour le diagnostic).
+    """
     results: dict[str, DeliveryResult] = {}
     try:
-        status, _ = conn.select(_quote(folder), readonly=True)
-        if status != "OK":
-            return results
-        # Corrélation par en-tête, pas par sujet : les messages réalistes ont un
-        # sujet crédible sans jeton. L'en-tête X-DomaineAnalyser-Test porte
-        # toujours « DAT-… » ; une recherche par dossier suffit, on trie ensuite.
-        status, data = conn.search(None, "HEADER", "X-DomaineAnalyser-Test", "DAT-")
+        if conn.select(_quote(folder), readonly=True)[0] != "OK":
+            return results, 0
+        status, data = conn.search(None, "SINCE", since)
     except imaplib.IMAP4.error:
-        return results
+        return results, 0
     if status != "OK" or not data or not data[0]:
-        return results
+        return results, 0
 
+    seen = 0
     for num in data[0].split():
         try:
             status, msg_data = conn.fetch(num, "(BODY.PEEK[HEADER])")
@@ -154,9 +195,11 @@ def _scan_folder(
             continue
         headers = BytesParser(policy=default_policy).parsebytes(msg_data[0][1])
         token = str(headers.get("X-DomaineAnalyser-Test", "")).strip()
+        if token.startswith("DAT-"):
+            seen += 1
         if token in wanted and token not in results:
             results[token] = _build_delivery(headers, folder, is_junk)
-    return results
+    return results, seen
 
 
 def _build_delivery(headers: Message, folder: str, is_junk: bool) -> DeliveryResult:
@@ -203,6 +246,7 @@ def cleanup_tokens(mailbox: MailboxAccess, tokens: set[str]) -> int:
     if not tokens:
         return 0
     removed = 0
+    since = _imap_since_date()
     try:
         conn = _connect(mailbox)
     except Exception:
@@ -212,7 +256,7 @@ def cleanup_tokens(mailbox: MailboxAccess, tokens: set[str]) -> int:
             try:
                 if conn.select(_quote(folder))[0] != "OK":
                     continue
-                status, data = conn.search(None, "HEADER", "X-DomaineAnalyser-Test", "DAT-")
+                status, data = conn.search(None, "SINCE", since)
                 if status != "OK" or not data or not data[0]:
                     continue
                 for num in data[0].split():

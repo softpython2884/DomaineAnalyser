@@ -168,7 +168,33 @@ def interpret(
             "bloquée : l'utilisateur peut encore consulter le message."
         )
 
-    # DELIVERED — l'usurpation a réussi. On qualifie la gravité selon la cible.
+    # DELIVERED. Deux cas disqualifient le résultat comme « usurpation ».
+    #
+    # 1. SPF pass : l'IP émettrice figure dans le SPF de la cible. Elle est donc
+    #    autorisée — ce n'est pas un spoof, le domaine reconnaît cet expéditeur.
+    if (delivery.auth.spf or "").lower() == "pass":
+        return (
+            f"Cette machine est un émetteur AUTORISÉ de « {target} » : son IP figure "
+            "dans le SPF du domaine (spf=pass), donc DMARC passe légitimement. Ce "
+            "n'est pas une usurpation — le domaine reconnaît cet expéditeur. Pour "
+            "éprouver une VRAIE usurpation, émets depuis une IP absente du SPF de la cible."
+        )
+
+    # 2. dmarc=pass sans SPF : on n'a envoyé aucune signature valide (on n'a pas
+    #    la clé de la cible). L'alignement ne peut venir que d'une signature
+    #    ajoutée par le récepteur — il gère la cible comme un domaine local.
+    if (delivery.auth.dmarc or "").lower() == "pass":
+        return (
+            f"⚠️ Arrivé en boîte avec dmarc=pass — alors qu'aucune signature valide "
+            f"n'a été émise (on ne possède pas la clé de « {target} »). Le récepteur "
+            "gère donc ce domaine comme LOCAL et a auto-signé le message (DKIM aligné "
+            "ajouté par lui). Ce résultat ne reflète PAS la spoofabilité réelle : "
+            "teste vers une boîte chez un autre hébergeur. Et côté serveur, corrige "
+            "d'urgence la signature du courrier ENTRANT de tes domaines — un spoof "
+            "relayé hériterait sinon d'une signature parfaitement valide."
+        )
+
+    # DELIVERED réel — l'usurpation a réussi. On qualifie la gravité selon la cible.
     base = f"⚠️ Arrivé en BOÎTE DE RÉCEPTION{auth}. L'usurpation a réussi contre ce récepteur."
     if scenario.mode is ForgeMode.DISPLAY_NAME:
         return base + (
@@ -217,6 +243,14 @@ def build_result(
     interpretation = interpret(
         scenario, disposition, delivery, smtp, target=target, target_policy=target_policy
     )
+    spf = (delivery.auth.spf or "").lower()
+    dmarc = (delivery.auth.dmarc or "").lower()
+    delivered = disposition.spoof_succeeded
+    # SPF pass = l'IP est autorisée par le domaine : émetteur légitime, pas un
+    # spoof depuis cette machine. dmarc=pass sans SPF = signature ajoutée par le
+    # récepteur. Les deux disqualifient le résultat comme « usurpation réussie ».
+    authorized_sender = delivered and spf == "pass"
+    self_signed = delivered and not authorized_sender and dmarc == "pass"
     return ScenarioResult(
         scenario=scenario,
         message=message,
@@ -224,4 +258,6 @@ def build_result(
         delivery=delivery,
         disposition=disposition,
         interpretation=interpretation,
+        authorized_sender=authorized_sender,
+        self_signed=self_signed,
     )

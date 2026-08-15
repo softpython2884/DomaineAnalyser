@@ -217,19 +217,37 @@ def _build_delivery(headers: Message, folder: str, is_junk: bool) -> DeliveryRes
 
 
 def parse_auth_results(headers: Message) -> AuthResults:
-    """Extrait les verdicts SPF/DKIM/DMARC stampés par le récepteur."""
+    """Extrait les verdicts SPF/DKIM/DMARC stampés par le récepteur.
+
+    Un Authentication-Results contient souvent DEUX résultats SPF : celui du
+    HELO et celui de l'enveloppe (`smtp.mailfrom`). Seul ce dernier compte pour
+    l'alignement DMARC ; on le préfère systématiquement. Prendre le premier
+    venu (le HELO) affichait « spf=none » là où l'enveloppe passait bel et bien.
+    """
     values: list[str] = []
     for name in ("Authentication-Results", "ARC-Authentication-Results"):
         values.extend(str(v) for v in (headers.get_all(name, []) or []))
 
     auth = AuthResults(raw="; ".join(values) or None)
-    # La première mention l'emporte : l'Authentication-Results le plus récent
-    # (celui du récepteur final) est en tête de liste des en-têtes.
+    spf_mailfrom: str | None = None
+    spf_other: str | None = None
+
     for blob in values:
-        for field, verdict in _AUTH_FIELD.findall(blob):
-            slot = field.lower()
-            if getattr(auth, slot, None) is None:
-                setattr(auth, slot, verdict.lower())
+        # Chaque méthode est un segment séparé par « ; ».
+        for segment in blob.split(";"):
+            match = _AUTH_FIELD.search(segment)
+            if not match:
+                continue
+            method, verdict = match.group(1).lower(), match.group(2).lower()
+            if method == "spf":
+                if "smtp.mailfrom" in segment.lower():
+                    spf_mailfrom = spf_mailfrom or verdict
+                else:
+                    spf_other = spf_other or verdict
+            elif getattr(auth, method, None) is None:
+                setattr(auth, method, verdict)
+
+    auth.spf = spf_mailfrom if spf_mailfrom is not None else spf_other
     return auth
 
 

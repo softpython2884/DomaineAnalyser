@@ -226,3 +226,69 @@ def test_selection_de_scenarios():
 
 def test_scenarios_par_defaut_non_vide():
     assert len(scenarios.get_scenarios()) >= 4
+
+
+# --- détection de l'auto-signature du récepteur ------------------------------
+
+
+def _forged(mode: ForgeMode):
+    return build_forged_message(_scenario(mode), target="exemple.fr", mailbox=MAILBOX, token="DAT-z")
+
+
+def _delivered(spf: str | None, dmarc: str | None, target: str = "exemple.fr"):
+    smtp = SmtpResult(accepted=True, code=250, stage="data")
+    delivery = DeliveryResult(arrived=True, folder="INBOX")
+    delivery.auth.spf = spf
+    delivery.auth.dmarc = dmarc
+    return scenarios.build_result(
+        _scenario(ForgeMode.EXACT),
+        _forged(ForgeMode.EXACT),
+        smtp,
+        delivery,
+        target=target,
+        target_policy="reject",
+    )
+
+
+def test_spf_pass_est_un_emetteur_autorise_pas_une_usurpation():
+    # L'IP est dans le SPF de la cible : livraison légitime, jamais une brèche.
+    res = _delivered(spf="pass", dmarc="pass")
+    assert res.disposition is Disposition.DELIVERED
+    assert res.authorized_sender
+    assert not res.self_signed
+    assert "autoris" in res.interpretation.lower()
+
+
+def test_dmarc_pass_sans_spf_est_une_auto_signature():
+    # dmarc=pass sans SPF et sans signature de notre part => le récepteur a signé.
+    res = _delivered(spf="softfail", dmarc="pass")
+    assert res.self_signed
+    assert not res.authorized_sender
+    assert "auto-sign" in res.interpretation.lower() or "signature" in res.interpretation.lower()
+
+
+def test_dmarc_fail_delivre_est_une_vraie_breche():
+    res = _delivered(spf="fail", dmarc="fail")
+    assert res.disposition is Disposition.DELIVERED
+    assert not res.authorized_sender
+    assert not res.self_signed
+
+
+def test_classification_dans_la_campagne():
+    from datetime import datetime, timezone
+
+    from domaine_analyser.active.models import CampaignResult
+
+    campaign = CampaignResult(
+        target="exemple.fr",
+        mailbox_address="test@ninight.capibara.fr",
+        started_at=datetime.now(tz=timezone.utc),
+        results=[
+            _delivered(spf="pass", dmarc="pass"),  # autorisé
+            _delivered(spf="softfail", dmarc="pass"),  # auto-signé
+            _delivered(spf="fail", dmarc="fail"),  # vraie brèche
+        ],
+    )
+    assert len(campaign.breaches) == 1
+    assert len(campaign.authorized_hits) == 1
+    assert len(campaign.self_signed_hits) == 1

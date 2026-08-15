@@ -175,6 +175,13 @@ class ScenarioResult:
     delivery: DeliveryResult
     disposition: Disposition
     interpretation: str = ""
+    #: L'IP émettrice figure dans le SPF de la cible : elle est autorisée à
+    #: envoyer pour ce domaine. Ce n'est donc pas une usurpation possible depuis
+    #: cette machine — le domaine la reconnaît. À écarter des « réussites ».
+    authorized_sender: bool = False
+    #: dmarc=pass sans que SPF passe et sans qu'on ait signé : le récepteur a
+    #: ajouté une signature (il gère la cible comme locale). Test non concluant.
+    self_signed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -188,6 +195,8 @@ class ScenarioResult:
             "delivery": self.delivery.to_dict(),
             "disposition": self.disposition.value,
             "disposition_label": self.disposition.label_fr,
+            "authorized_sender": self.authorized_sender,
+            "self_signed": self.self_signed,
             "interpretation": self.interpretation,
         }
 
@@ -206,8 +215,22 @@ class CampaignResult:
 
     @property
     def breaches(self) -> list[ScenarioResult]:
-        """Scénarios où l'usurpation a atteint la boîte de réception."""
-        return [r for r in self.results if r.disposition.spoof_succeeded]
+        """Vraies réussites : arrivées en boîte alors qu'on n'y était pas autorisé."""
+        return [
+            r
+            for r in self.results
+            if r.disposition.spoof_succeeded and not r.self_signed and not r.authorized_sender
+        ]
+
+    @property
+    def self_signed_hits(self) -> list[ScenarioResult]:
+        """Arrivées en boîte via une auto-signature du récepteur (test invalide)."""
+        return [r for r in self.results if r.self_signed]
+
+    @property
+    def authorized_hits(self) -> list[ScenarioResult]:
+        """Arrivées parce que l'IP est un émetteur autorisé (pas une usurpation)."""
+        return [r for r in self.results if r.authorized_sender]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -217,6 +240,7 @@ class CampaignResult:
             "dry_run": self.dry_run,
             "target_policy": self.target_policy,
             "breaches": len(self.breaches),
+            "self_signed_hits": len(self.self_signed_hits),
             "results": [r.to_dict() for r in self.results],
             "notes": list(self.notes),
         }

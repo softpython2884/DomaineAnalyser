@@ -29,14 +29,38 @@ _DISPOSITION_STYLE = {
 
 def print_campaign(console: Console, campaign: CampaignResult) -> None:
     breaches = campaign.breaches
+    self_signed = campaign.self_signed_hits
+    header = Text()
+    header.append(f"Usurpation de {campaign.target}\n", style="bold")
+
+    authorized = campaign.authorized_hits
     if breaches:
-        header = Text()
-        header.append(f"Usurpation de {campaign.target}\n", style="bold")
-        header.append(f"{len(breaches)} scénario(s) ont atteint la boîte de réception", style="bold red")
+        header.append(
+            f"{len(breaches)} scénario(s) ont atteint la boîte de réception", style="bold red"
+        )
         border = "red"
+    elif authorized:
+        header.append(
+            "Cette machine est un émetteur AUTORISÉ de la cible", style="bold cyan"
+        )
+        header.append(
+            "\nSPF pass : ce n'est pas une usurpation depuis cette IP.\n"
+            "Teste depuis une IP hors du SPF de la cible pour éprouver l'usurpation.",
+            style="cyan",
+        )
+        border = "cyan"
+    elif self_signed:
+        header.append(
+            f"{len(self_signed)} message(s) délivrés via une AUTO-SIGNATURE du récepteur",
+            style="bold yellow",
+        )
+        header.append(
+            "\nTest non concluant : ce serveur gère la cible comme un domaine local.\n"
+            "Teste vers une boîte externe (voir détails).",
+            style="yellow",
+        )
+        border = "yellow"
     else:
-        header = Text()
-        header.append(f"Usurpation de {campaign.target}\n", style="bold")
         header.append("Aucun message forgé n'a atteint la boîte de réception", style="bold green")
         border = "green"
 
